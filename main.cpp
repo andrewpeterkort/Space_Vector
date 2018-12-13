@@ -4,24 +4,26 @@
  * Andrew Peterkort
  *************************************************/
 #include <cstdint>
-#include <cstdlib>
 #include <cstdio>
-#include <ctime>
 #include <cstring>
 #include <unistd.h>//This is a unix/linux library, need replacement
+#include <random>
+#include <ctime>//needs replacement
 
 /*************************************************
  * OBJECT: BLOCK 
  * uses a 64 bit seed number to create a 32x32 bit array of ones and zeros
  * each block represents a grid of astroids in space and is generated with
- * Conway's Game of Life like algorithims *************************************************/ class Block {
+ * Conway's Game of Life like algorithims
+ *************************************************/
+class Block {
 
 	public:
-		uint64_t seed; //stores the initial seed for random generation
+		uint32_t seed; //stores the initial seed for random generation
 		uint32_t* block; //stores the current block of 32x32 bit astroid layout
 		void printBlock();
-		void playConway();//prints out the progression of generations
-		Block(uint64_t);
+		void generateBlock();//prints out the progression of generations
+		Block(uint32_t,std::mt19937*);
 		~Block();
 
 	private:
@@ -30,8 +32,9 @@
 		void writeCell(int, int, uint32_t*); //writes a cell to x,y
 		void deleteCell(int, int, uint32_t*); //deletes cell at x,y
 		int countNeighbors(int, int, uint32_t*); //countes the total neghboring cells to x,y
-		void cycleConway(); //plays one frame of the game
+		bool cycleConway(); //plays one frame of the game
 		void clearScreen();
+		std::mt19937* randGen;
 
 };
 
@@ -101,21 +104,26 @@ int Block::countNeighbors(int x, int y, uint32_t* inBlock){
 //decide the fait of the cell or no-cell at the current position
 //drawBlock starts each new cycle as a copy of block so cells that
 //stay allive with value 2 are left alone... etc.
-void Block::cycleConway(){
+bool Block::cycleConway(){
 
+	uint32_t maskMod32 = 31;
 	int numNeighbors;
+	int totalNeighbors = 0;
 
 	for( int y = 0; y < 32; y++ ){
 
 		for( int x = 0; x < 32; x++ ){
 
 			numNeighbors = countNeighbors(x,y,block);
+			totalNeighbors += numNeighbors; //add the total neighbors to see if there are any cells in the block
 
-			if( numNeighbors == 3 ){
+			//more entropy is added through randGen to make sure the algo does not make common identifiable
+			//shapes and instead the astroid groups look more random. Uses maskMod32 for more effecient bit masking vs moding
+			if( (numNeighbors == 3) || ((numNeighbors == 2) && (((*randGen)() & maskMod32) == 1)) ){
 
 				writeCell(x,y,drawBlock);
 
-			}else if( (numNeighbors < 2) || (numNeighbors > 3) ){
+			}else if( numNeighbors < 2 ){
 
 				deleteCell(x,y,drawBlock);
 
@@ -126,6 +134,11 @@ void Block::cycleConway(){
 	}
 
 	memcpy(block,drawBlock,128);
+	
+	if( totalNeighbors == 0 ) //if there are no cells in teh block, return false to tell the lower function
+		return false;
+
+	return true;
 
 }
 
@@ -165,28 +178,34 @@ void Block::printBlock(){
 
 }
 
-void Block::playConway(){
+void Block::generateBlock(){
 
-	for(;;){ //forever
+	for( int i = 0; i < 20; i++ ){
 
 		clearScreen();
 		printBlock();
-		cycleConway();
+
+		if( cycleConway() == false ) //if cycleConway detects no cells in the block
+			break;
+
 		usleep(100000); //this call needs to be replaced in the future for cross platform ability
 
 	}
 
 }
 
-Block::Block(uint64_t seed){
+Block::Block(uint32_t seed, std::mt19937* randGenerator){
 
+	uint32_t maskMod32 = 31;
 	this->seed = seed;
-	srand(seed); //a different rand algo needs to be considered too
+	this->randGen = randGenerator;
+	randGenerator->seed(seed);
 	block = new uint32_t [32];
 	drawBlock = new uint32_t [32];
 
-	for( int i = 0; i < 100; i++ )
-		writeCell(rand()%32, rand()%32, block);
+	for( int i = 0; i < 50; i++ )
+		writeCell((*this->randGen)() & maskMod32, (*this->randGen)() & maskMod32, block); //masking to make clear that we are not creating
+	//and statistical non-uniformaties with our random numbers
 
 	memcpy(drawBlock,block,128);
 
@@ -201,10 +220,12 @@ Block::~Block(){
 
 int main() {
 
-	uint32_t seed = time(NULL);
-	Block* newBlock = new Block(seed);
-	newBlock->playConway(); //the program actually stops here
+	uint32_t seed = time(NULL); //this will be replaced eventually
+	std::mt19937* randGenerator = new std::mt19937; //only init mt19937 once because it takes time
+	Block* newBlock = new Block(seed,randGenerator);
+	newBlock->generateBlock(); //the program actually stops here
 	delete newBlock;
+	delete randGenerator;
 
 	return 1;
 
