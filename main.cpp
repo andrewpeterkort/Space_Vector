@@ -10,6 +10,43 @@
 #include <random>
 #include <ctime>//needs replacement
 
+//OK BRO. we need to change the 3x96 bullshit to a 96x96 uint8_t array
+//then the only problem is switching between the rand generators
+//then do all the astroid differentiation filltering and stuff on the array
+//place space station, planets, then translate array into real
+//linked list final data structure and hash store it!
+
+//WE PROBABLY WANT TO SWITCH MEMCOPY FOR SOMETHING MORE CONVENTIONAL
+
+//Obviouse limit flaws to finding seed differences and get out of range
+//of any affect for our limited 32 bit seed consider some kind of mask
+//to make generation infinite..... testing it would be hard
+
+uint64_t getNaturalCordinate(int64_t cord){
+
+	uint64_t natCord = 0;
+
+	if( cord > 0 )
+		natCord = cord * 2;
+
+	if( cord < 0 )
+		natCord = (cord * -2) - 1;
+
+	return natCord;
+
+}
+
+uint32_t getSeedDiff(int64_t xBlock, int64_t yBlock){
+
+	uint64_t natVectX = getNaturalCordinate(xBlock);
+	uint64_t natVectY = getNaturalCordinate(yBlock);
+
+	return (uint32_t)(((natVectX + natVectY)*(natVectX + natVectY + 1)/2) + natVectX);
+	//this is the Cantor pairing algo. Inputs need to be put onto the natural number line
+	//because the cantor pairing formula changes (N,N) -> N
+
+}
+
 /*************************************************
  * OBJECT: BLOCK 
  * uses a 64 bit seed number to create a 32x32 bit array of ones and zeros
@@ -20,21 +57,23 @@ class Block {
 
 	public:
 		uint32_t seed; //stores the initial seed for random generation
-		uint32_t* block; //stores the current block of 32x32 bit astroid layout
+		uint32_t** block; //stores the current block of 32x32 bit astroid layout
 		void printBlock();
 		void generateBlock();//prints out the progression of generations
-		Block(uint32_t,std::mt19937*);
+		int64_t xBlock;
+		int64_t yBlock;
+		Block(uint32_t,std::mt19937**,int64_t,int64_t);
 		~Block();
 
 	private:
-		uint32_t* drawBlock; //this is the buffer block that has the new fram written to it
+		uint32_t** drawBlock; //this is the buffer block that has the new frame written to it.
 		bool readCell(int, int, uint32_t*); //reads if a cell exits at x,y
 		void writeCell(int, int, uint32_t*); //writes a cell to x,y
 		void deleteCell(int, int, uint32_t*); //deletes cell at x,y
 		int countNeighbors(int, int, uint32_t*); //countes the total neghboring cells to x,y
 		bool cycleConway(); //plays one frame of the game
 		void clearScreen();
-		std::mt19937* randGen;
+		std::mt19937** randGen;
 
 };
 
@@ -114,18 +153,18 @@ bool Block::cycleConway(){
 
 		for( int x = 0; x < 32; x++ ){
 
-			numNeighbors = countNeighbors(x,y,block);
+			numNeighbors = countNeighbors(x,y,&block[1][32]);
 			totalNeighbors += numNeighbors; //add the total neighbors to see if there are any cells in the block
 
 			//more entropy is added through randGen to make sure the algo does not make common identifiable
 			//shapes and instead the astroid groups look more random. Uses maskMod32 for more effecient bit masking vs moding
-			if( (numNeighbors == 3) || ((numNeighbors == 2) && (((*randGen)() & maskMod32) == 1)) ){
+			if( (numNeighbors == 3) || ((numNeighbors == 2) && (((*randGen[4])() & maskMod32) == 1)) ){
 
-				writeCell(x,y,drawBlock);
+				writeCell(x,y,&drawBlock[1][32]);
 
 			}else if( numNeighbors < 2 ){
 
-				deleteCell(x,y,drawBlock);
+				deleteCell(x,y,&drawBlock[1][32]);
 
 			}
 
@@ -133,7 +172,7 @@ bool Block::cycleConway(){
 
 	}
 
-	memcpy(block,drawBlock,128);
+	memcpy(&block[1][32],&drawBlock[1][32],128);
 	
 	if( totalNeighbors == 0 ) //if there are no cells in teh block, return false to tell the lower function
 		return false;
@@ -160,7 +199,7 @@ void Block::printBlock(){
 
 			printf(" ");
 
-			if( readCell(x,y,block) == true ){
+			if( readCell(x,y,&block[1][32]) == true ){
 
 				printf("*");
 
@@ -194,24 +233,70 @@ void Block::generateBlock(){
 
 }
 
-Block::Block(uint32_t seed, std::mt19937* randGenerator){
+Block::Block(uint32_t seed, std::mt19937** randGenerators, int64_t xBlock, int64_t yBlock){
 
+	uint8_t blockCount = 0;
+	uint8_t seedCount = 0;
 	uint32_t maskMod32 = 31;
+
 	this->seed = seed;
-	this->randGen = randGenerator;
-	randGenerator->seed(seed);
-	block = new uint32_t [32];
-	drawBlock = new uint32_t [32];
+	this->xBlock = xBlock;
+	this->yBlock = yBlock;
+	this->randGen = randGenerators;
 
-	for( int i = 0; i < 50; i++ )
-		writeCell((*this->randGen)() & maskMod32, (*this->randGen)() & maskMod32, block); //masking to make clear that we are not creating
+	for( int x = -1; x <= 1; x++ ){
+
+		for( int y = -1; y <= 1; y++ ){
+
+			if( (x == 0) && (y == 0) )
+				continue;
+
+			this->randGen[seedCount]->seed(seed + getSeedDiff(xBlock + x, yBlock + y));
+			seedCount++;
+			//we are assuming that this block is the (0,0) block here, keep note of that for
+			//further interations
+
+		}
+	}
+
+
+	block = new uint32_t* [3];
+	drawBlock = new uint32_t* [3];
+
+	for( int i = 0; i < 3; i++ ){
+
+		block[i] = new uint32_t [96];
+		drawBlock[i] = new uint32_t [96];
+	}
+
+	for( int i = 0; i < 50; i++ ){
+
+		blockCount = 0;
+
+		for( int j = 0; j < 3; j++ ){
+
+			for( int k = 0; k <= 64; k += 32 ) {
+
+				writeCell((*this->randGen[blockCount])() & maskMod32, (*this->randGen[blockCount])() & maskMod32, &block[j][k]);
+				memcpy(&drawBlock[j][k],&block[j][k],128);
+				blockCount++;
+			}
+		}
+	}
+	//masking to make clear that we are not creating
 	//and statistical non-uniformaties with our random numbers
-
-	memcpy(drawBlock,block,128);
-
+	//populating all nine blocks to allow for clean block boarders
+	//population proceeds across borders during generation
+	
 }
 
 Block::~Block(){
+
+	for( int i = 0; i < 3; i++ ){
+
+		delete[] block [i];
+		delete[] drawBlock [i];
+	}
 
 	delete[] block;
 	delete[] drawBlock;
@@ -221,11 +306,19 @@ Block::~Block(){
 int main() {
 
 	uint32_t seed = time(NULL); //this will be replaced eventually
-	std::mt19937* randGenerator = new std::mt19937; //only init mt19937 once because it takes time
-	Block* newBlock = new Block(seed,randGenerator);
+	std::mt19937* randNumGenerators[9];
+
+	//we want to keep all 9 in memory to speed up generating new blocks
+	for( int i = 0; i < 9; i++ )
+		randNumGenerators[i] = new std::mt19937;
+
+	//std::mt19937* randGenerator = new std::mt19937; //only init mt19937 once because it takes time
+	Block* newBlock = new Block(seed,randNumGenerators,0,0);
 	newBlock->generateBlock(); //the program actually stops here
 	delete newBlock;
-	delete randGenerator;
+
+	for( int i = 0; i < 9; i++ )
+		delete randNumGenerators[i];
 
 	return 1;
 
